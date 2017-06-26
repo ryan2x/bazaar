@@ -1,11 +1,13 @@
 package com.clearcut.nlp
 
+import edu.stanford.nlp.util.logging.Redwood
 import play.api.libs.json.{JsObject, JsString, JsValue, Json}
 
 import scala.io.Source
 
 class JSONReader(input:Source, docIdKeys:Array[String], documentKey:String)
   extends Iterator[(Array[String], String)] {
+  def logger = Redwood.channels(this.getClass)
 
   var it = input.getLines.zipWithIndex
   var _next = fetchNext()
@@ -45,7 +47,7 @@ class JSONReader(input:Source, docIdKeys:Array[String], documentKey:String)
         //case (Array[None],_) =>
         //  System.err.println(s"Warning: skipped malformed line ${num}: ${line}")
         case (_, None) =>
-          System.err.println(s"Warning: skipped malformed line ${num}: ${line}")
+          logger.error(s"Warning: skipped malformed line ${num}: ${line}")
       }
     }
     n

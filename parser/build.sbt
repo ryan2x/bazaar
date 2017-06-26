@@ -14,8 +14,12 @@ libraryDependencies ++= List(
   "ch.qos.logback" % "logback-classic" % "1.0.7",
   "com.typesafe.play" %% "play-json" % "2.2.1",
   "com.github.scopt" %% "scopt" % "3.2.0",
-  "edu.stanford.nlp" % "stanford-corenlp" % "3.5.1",
-  "edu.stanford.nlp" % "stanford-corenlp" % "3.5.1" classifier "models",
+  // "edu.stanford.nlp" % "stanford-corenlp" % "3.7.0",
+  // "edu.stanford.nlp" % "stanford-corenlp" % "3.5.1",
+  // "edu.stanford.nlp" % "stanford-corenlp" % "3.5.1" classifier "models",
+  // "stanford-chinese-corenlp-2016-10-31-models.jar ",
+  "edu.stanford.nlp" % "stanford-corenlp" % "3.7.0" classifier "models",
+  //
   "org.scalatest" % "scalatest_2.10" % "2.0.RC2" % "test",
   "org.http4s" %% "http4s-dsl" % "0.7.0",
   "org.http4s" %% "http4s-jetty" % "0.7.0"

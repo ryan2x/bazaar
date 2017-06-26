@@ -18,7 +18,8 @@ class DocumentParser(props: Properties) {
 
     // Temporary fix for bug where brackets are being incorrectly treated as punct
     // and somehow this messes up the whole dep parse -> change them to round braces
-    val doc2 = doc.replaceAll("""\[""", "(").replaceAll("""\]""", ")")
+    var specialNoneChineseChars = "\uE78D|↑|□"
+    val doc2 = doc.replaceAll("""\[""", "(").replaceAll("""\]""", ")").replaceAll(specialNoneChineseChars,"")
 
     val document = new Annotation(doc2)
     pipeline.annotate(document)
@@ -26,7 +27,7 @@ class DocumentParser(props: Properties) {
     val sentences = document.get(classOf[SentencesAnnotation])
 
     val sentenceResults = sentences.zipWithIndex.map { case(sentence, sentIdx) =>
-      val content = sentence.toString
+      val content = sentence.toString.replaceAll("\\s+", " ")
       val tokens = sentence.get(classOf[TokensAnnotation])
       val wordList = tokens.map(_.get(classOf[TextAnnotation]))
       val posList = tokens.map(_.get(classOf[PartOfSpeechAnnotation]))
@@ -74,7 +75,9 @@ class DocumentParser(props: Properties) {
       // Replace '"' with '\\"' to be accepted by COPY FROM
       if (x.contains("\\")) 
         "\"" + x.replace("\\", "\\\\\\\\").replace("\"", "\\\\\"") + "\""
-      else 
+      else if (x.contains("\""))
+        "\"" + x.replace("\"", "\\\\\"") + "\""
+      else
         "\"" + x + "\""
       ).mkString("{", ",", "}")
   }
@@ -96,6 +99,11 @@ class DocumentParser(props: Properties) {
   // http://stackoverflow.com/questions/3089077/new-lines-in-tab-delimited-or-comma-delimtted-output
   def replaceChars(str: String) : String = {
     str.replace("\n", " ").replace("\t", " ")
+  }
+
+  def emptyString(str: String) : Boolean = {
+    var arr1 = str.split("\\s+")
+    arr1.length == 0
   }
 
 }

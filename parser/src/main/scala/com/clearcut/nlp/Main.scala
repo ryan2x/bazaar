@@ -1,13 +1,15 @@
 package com.clearcut.nlp
 
-import java.io.{BufferedWriter, File, FileOutputStream, OutputStreamWriter}
-import java.nio.charset.CodingErrorAction
+import java.io.{BufferedWriter, File, FileOutputStream, InputStream, InputStreamReader, OutputStreamWriter}
+import java.nio.charset.{Charset, CodingErrorAction}
 import java.util.Properties
 
 import scala.io.Source
-
+import edu.stanford.nlp.util.logging.RedwoodConfiguration
+import edu.stanford.nlp.util.logging.Redwood
 
 object Main extends App {
+  def logger = Redwood.channels(this.getClass)
 
   // Parse command line options
   case class Config(serverPort: Integer = null,
@@ -16,8 +18,8 @@ object Main extends App {
                     formatIn: String = "json",
                     documentKey: String = "text",
                     idKeys: String = "id",
-                    maxSentenceLength: String = "100",
-                    annotators: String = "tokenize, cleanxml, ssplit, pos, lemma, ner, parse")
+                    maxSentenceLength: String = "10000",
+                    annotators: String = "tokenize, cleanxml, ssplit, pos, lemma, ner, parse, regexner")
 
   val optionsParser = new scopt.OptionParser[Config]("DeepDive DocumentParser") {
     head("DocumentParser for TSV Extractors", "0.1")
@@ -49,20 +51,89 @@ object Main extends App {
     } text("Register task start and complete in simple .reg file")
   }
 
+  def setup_log4nlp(): Unit = {
+    val propStream = getClass.getResourceAsStream("/log4nlp.properties")
+    val props = new Properties()
+    props.load(propStream)
+    // RedwoodConfiguration.empty()
+//    RedwoodConfiguration.apply(props)
+    // RedwoodConfiguration.slf4j()
+    RedwoodConfiguration.empty().neatExit().capture(System.out).capture(System.err)
+      .channelWidth(20)
+      .handlers(
+        RedwoodConfiguration.Handlers.branch(
+          RedwoodConfiguration.Handlers.chain(
+            RedwoodConfiguration.Handlers.hideDebug,
+            RedwoodConfiguration.Handlers.slf4j),
+          RedwoodConfiguration.Handlers.chain(
+            RedwoodConfiguration.Handlers.hideDebug,
+            RedwoodConfiguration.Handlers.file("bazaar-parser.log"))
+        ),
+        RedwoodConfiguration.Handlers.noop
+//        RedwoodConfiguration.Handlers.chain(
+//          RedwoodConfiguration.Handlers.hideDebug,
+//          RedwoodConfiguration.Handlers.collapseExact,
+//          RedwoodConfiguration.Handlers.slf4j),
+//        RedwoodConfiguration.Handlers.output
+      )
+      .apply()
+/*
+   *   handlers(branch(
+   *     chain( hideDebug, collapseApproximate, branch( output, file("stderr.log") ),
+   *     chain( showOnlyError, file("err.log") ).
+   *     chain( showOnlyChannels("results", "evaluate"), file("results.log") ),
+   *     chain( file("redwood.log") ),
+   *   noop))
+
+ */
+  }
+
   val conf = optionsParser.parse(args, Config()) getOrElse {
     throw new IllegalArgumentException
   }
 
-  System.err.println(s"Parsing with max_len=${conf.maxSentenceLength}")
+  setup_log4nlp()
+
+  logger.debug(s"Parsing with max_len=${conf.maxSentenceLength}")
 
   // Configuration has been parsed, execute the Document parser
   val props = new Properties()
+  val flagChinese = true
+  if (flagChinese) {
+    val propStream = getClass.getResourceAsStream("/StanfordCoreNLP-chinese.properties")
+    props.load(new InputStreamReader(propStream, Charset.forName("UTF-8")))
+    propStream.close()
+  }
   props.put("annotators", conf.annotators)
   props.put("parse.maxlen", conf.maxSentenceLength)
-  props.put("parse.model", "edu/stanford/nlp/models/srparser/englishSR.ser.gz")
+  // props.put("parse.model", "edu/stanford/nlp/models/srparser/chineseSR.ser.gz")
+  if (flagChinese) {
+    // props.put("ssplit.boundaryTokenRegex", "[.]|[!?]+|[。]|[！？]+");
+    var NERmappings = Array("edu/stanford/nlp/models/kbp/cn_regexner_mapping.tab")
+    val mapping_files = Array("politics.txt", "companies.txt", "locations.txt")
+    mapping_files.foreach { filename =>
+      val url1 = getClass.getResource("/"+filename)
+      if (url1 != null) {
+        NERmappings :+= filename
+      }
+      else {
+        logger.debug("'{}' not found",filename)
+      }
+    }
+    props.put("regexner.mapping", NERmappings.mkString(", "))
+  }
+  else {
+    props.put("parse.model", "edu/stanford/nlp/models/srparser/englishSR.ser.gz")
+  }
   props.put("threads", "1") // Should use extractor-level parallelism
   props.put("clean.allowflawedxml", "true")
   props.put("clean.sentenceendingtags", "p|br|div|li|ul|ol|h1|h2|h3|h4|h5|blockquote|section|article")
+  //
+  if (flagChinese) {
+    logger.debug("regexner.mapping="+props.getProperty("regexner.mapping"))
+  }
+  //
+  logger.info("bazaar parser begins")
   val dp = new DocumentParser(props)
 
   implicit val codec = new scala.io.Codec(
@@ -84,12 +155,12 @@ object Main extends App {
   var register: BufferedWriter = null
   if (conf.fileName != null) {
     if (!new File(conf.fileName).exists) {
-      System.err.println("Input file does not exist: " + conf.fileName)
+      logger.debug("Input file does not exist: " + conf.fileName)
       System.exit(1)
     }
     input = Source.fromFile(conf.fileName)
     val outputFile = new File(conf.fileName + ".parsed")
-    System.err.println("Writing to file: " + conf.fileName + ".parsed")
+    logger.debug("Writing to file: " + conf.fileName + ".parsed")
     output = new BufferedWriter(
       new OutputStreamWriter(new FileOutputStream(outputFile), "UTF-8"),
       1000 * 1000
@@ -114,12 +185,12 @@ object Main extends App {
     new TSVReader(input, docIdKeys.zipWithIndex.map { case (id, i) => i }, docIdKeys.length + 1)
 
   reader.foreach { case (docIds, documentStr) =>
-      System.err.println(s"Parsing document ${docIds(0)}...")
+      logger.debug(s"Parsing document ${docIds(0)}...")
       try {
         // Output a TSV row for each sentence
-        dp.parseDocumentString(documentStr).sentences.zipWithIndex
+        dp.parseDocumentString(documentStr).sentences.filter(x => !dp.emptyString(x.sentence)).zipWithIndex
             .foreach { case (sentenceResult, sentence_idx) =>
-          if (docIds(0) != "") {
+          if (docIds.length>0 && docIds(0) != "") {
             val idsOutline = docIds.map(x => dp.replaceChars(x))
             val mainOutline = List(
               sentence_idx + 1,
@@ -172,4 +243,6 @@ object Main extends App {
     errout.flush()
     errout.close()
   }
+  logger.info("bazaar parser ended")
+  sys.exit(0)
 }
